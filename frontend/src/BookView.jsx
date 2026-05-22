@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
 
-const API = "http://localhost:8080";
+const API = import.meta.env.VITE_API_URL || "http://localhost:8080";
 
 const TOOLTIPS = {
     bid: "BID — a buy order resting in the book. Green bars show total quantity at each price level.",
@@ -127,10 +127,15 @@ YOUR JOB:
                     messages: [...history, { role: "user", content: userMsg }]
                 })
             });
+            if (!r.ok) {
+                const errData = await r.json().catch(() => ({}));
+                throw new Error(errData.detail || `HTTP ${r.status}`);
+            }
             const data = await r.json();
-            const reply = data.text || "no response";
-        } catch {
-            setMsgs(prev => [...prev, { role: "assistant", content: "connection error — check that uvicorn is running and GEMINI_API_KEY is set" }]);
+            const reply = data?.content?.[0]?.text || data?.error?.message || "no response from AI";
+            setMsgs(prev => [...prev, { role: "assistant", content: reply }]);
+        } catch (e) {
+            setMsgs(prev => [...prev, { role: "assistant", content: `Error: ${e.message || "connection error — check that uvicorn is running and GEMINI_API_KEY is set"}` }]);
         } finally {
             setLoading(false);
         }

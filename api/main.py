@@ -1,6 +1,8 @@
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'build'))
+from dotenv import load_dotenv
+load_dotenv()
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,7 +13,7 @@ import ob_engine as eng
 from api.models import OrderReq, TradeResp, LevelResp, BookResp
 from api.auth import init_db, create_user, authenticate_user, make_token, get_current_user, get_db
 
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -156,25 +158,33 @@ def get_history(symbol: str, username: str = Depends(get_current_user)):
 
 @app.post("/ai/chat")
 async def ai_chat(req: AIReq, username: str = Depends(get_current_user)):
-    if not ANTHROPIC_API_KEY:
-        raise HTTPException(500, "ANTHROPIC_API_KEY not set on server")
+    if not GEMINI_API_KEY:
+        raise HTTPException(500, "GEMINI_API_KEY not set on server")
+
+    # Convert messages to Gemini format (role: user/model, not user/assistant)
+    gemini_contents = []
+    for m in req.messages:
+        role = "model" if m["role"] == "assistant" else "user"
+        gemini_contents.append({"role": role, "parts": [{"text": m["content"]}]})
+
     async with httpx.AsyncClient() as client:
         r = await client.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": ANTHROPIC_API_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json"
-            },
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}",
+            headers={"content-type": "application/json"},
             json={
-                "model": "claude-sonnet-4-20250514",
-                "max_tokens": 1000,
-                "system": req.system,
-                "messages": req.messages
+                "system_instruction": {"parts": [{"text": req.system}]},
+                "contents": gemini_contents,
+                "generationConfig": {"maxOutputTokens": 1000}
             },
             timeout=30.0
         )
-        return r.json()
+        data = r.json()
+        # Extract text from Gemini response and return in a shape the frontend expects
+        try:
+            text = data["candidates"][0]["content"]["parts"][0]["text"]
+        except (KeyError, IndexError):
+            text = data.get("error", {}).get("message", "no response from Gemini")
+        return {"content": [{"text": text}]}
 
 @app.get("/health")
 def health():
