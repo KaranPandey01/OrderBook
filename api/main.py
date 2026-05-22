@@ -1,17 +1,15 @@
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'build'))
-from dotenv import load_dotenv
-load_dotenv()
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
 import httpx
 import ob_engine as eng
 from api.models import OrderReq, TradeResp, LevelResp, BookResp
 from api.auth import init_db, create_user, authenticate_user, make_token, get_current_user, get_db
+from datetime import datetime
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
@@ -93,11 +91,9 @@ def me(username: str = Depends(get_current_user)):
 
 @app.post("/order/{symbol}", response_model=list[TradeResp])
 def submit_order(symbol: str, req: OrderReq, username: str = Depends(get_current_user)):
-    from datetime import datetime
     book = get_book(symbol)
     side = eng.Side.BUY if req.side == "BUY" else eng.Side.SELL
     trades = book.submit(req.oid, side, req.px, req.qty, req.ts)
-
     conn = get_db()
     now = datetime.utcnow().isoformat()
     conn.execute(
@@ -111,7 +107,6 @@ def submit_order(symbol: str, req: OrderReq, username: str = Depends(get_current
         )
     conn.commit()
     conn.close()
-
     return [TradeResp(buy_oid=t.buy_oid, sell_oid=t.sell_oid, exec_px=t.exec_px, exec_qty=t.exec_qty) for t in trades]
 
 @app.delete("/order/{symbol}/{oid}")
@@ -143,11 +138,11 @@ def get_book_snap(symbol: str, depth: int = 10, username: str = Depends(get_curr
 def get_history(symbol: str, username: str = Depends(get_current_user)):
     conn = get_db()
     trades = conn.execute(
-        "SELECT * FROM user_trades WHERE username=? AND symbol=? ORDER BY created_at DESC LIMIT 100",
+        "SELECT * FROM user_trades WHERE username=? AND symbol=? ORDER BY created_at ASC LIMIT 200",
         (username, symbol)
     ).fetchall()
     orders = conn.execute(
-        "SELECT * FROM user_orders WHERE username=? AND symbol=? ORDER BY created_at DESC LIMIT 100",
+        "SELECT * FROM user_orders WHERE username=? AND symbol=? ORDER BY created_at DESC LIMIT 200",
         (username, symbol)
     ).fetchall()
     conn.close()
@@ -158,34 +153,40 @@ def get_history(symbol: str, username: str = Depends(get_current_user)):
 
 @app.post("/ai/chat")
 async def ai_chat(req: AIReq, username: str = Depends(get_current_user)):
-    if not GEMINI_API_KEY:
-        raise HTTPException(500, "GEMINI_API_KEY not set on server")
+    key = GEMINI_API_KEY
+    if not key:
+        raise HTTPException(500, "GEMINI_API_KEY not set on server — restart uvicorn with $env:GEMINI_API_KEY=your_key")
 
-    # Convert messages to Gemini format (role: user/model, not user/assistant)
-    gemini_contents = []
+    contents = []
     for m in req.messages:
         role = "model" if m["role"] == "assistant" else "user"
-        gemini_contents.append({"role": role, "parts": [{"text": m["content"]}]})
+        contents.append({"role": role, "parts": [{"text": m["content"]}]})
+
+    if not contents or contents[0]["role"] == "model":
+        contents.insert(0, {"role": "user", "parts": [{"text": "hello"}]})
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={key}"
 
     async with httpx.AsyncClient() as client:
         r = await client.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}",
-            headers={"content-type": "application/json"},
+            url,
             json={
                 "system_instruction": {"parts": [{"text": req.system}]},
-                "contents": gemini_contents,
-                "generationConfig": {"maxOutputTokens": 1000}
+                "contents": contents,
+                "generationConfig": {"maxOutputTokens": 800, "temperature": 0.7}
             },
             timeout=30.0
         )
         data = r.json()
-        # Extract text from Gemini response and return in a shape the frontend expects
+        if "error" in data:
+            raise HTTPException(500, data["error"].get("message", "gemini error"))
         try:
             text = data["candidates"][0]["content"]["parts"][0]["text"]
         except (KeyError, IndexError):
-            text = data.get("error", {}).get("message", "no response from Gemini")
-        return {"content": [{"text": text}]}
+            raise HTTPException(500, f"unexpected gemini response: {str(data)[:200]}")
+        return {"text": text}
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "active_books": list(books.keys())}
+    gemini_status = "configured" if GEMINI_API_KEY else "missing — set GEMINI_API_KEY env var"
+    return {"status": "ok", "active_books": list(books.keys()), "gemini": gemini_status}

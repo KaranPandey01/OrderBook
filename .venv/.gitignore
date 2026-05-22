@@ -1,0 +1,13 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyd
+*.so
+build/
+dist/
+node_modules/
+.env
+api/users.db
+*.db
+.vscode/settings.json

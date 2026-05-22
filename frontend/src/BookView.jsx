@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
 
-const API = import.meta.env.VITE_API_URL || "http://localhost:8080";
+const API = "http://localhost:8080";
 
 const TOOLTIPS = {
     bid: "BID — a buy order resting in the book. Green bars show total quantity at each price level.",
@@ -16,7 +16,7 @@ const TOOLTIPS = {
     qty: "Number of shares/units.",
     tape: "Real-time log of all executed trades.",
     cancel: "Remove a resting order from the book before it fills.",
-    pnl: "Realized P&L from completed trades in this session.",
+    pnl: "Realized P&L from completed trades. SELL trades add value, BUY trades subtract cost.",
     vwap: "Volume Weighted Average Price — average execution price weighted by trade size.",
 };
 
@@ -65,7 +65,7 @@ function Panel({ title, tip, children }) {
 function AIAssistant({ book, trades, pnl, vwap, username, token }) {
     const [open, setOpen] = useState(false);
     const [msgs, setMsgs] = useState([
-        { role: "assistant", content: `Hey ${username}! I'm your trading assistant. I can see your live order book, trades, and P&L. Ask me anything — what to trade, how the book looks, what the spread means, or how this engine works.` }
+        { role: "assistant", content: `Hey ${username}! I'm your AI trading assistant powered by Gemini. I can see your live order book, trades, and P&L. Ask me anything — what to trade, how the book looks, what the spread means, or how this engine works.` }
     ]);
     const [input, setInput] = useState("");
     const [loading, setLoading] = useState(false);
@@ -81,34 +81,33 @@ function AIAssistant({ book, trades, pnl, vwap, username, token }) {
         const totalVol = trades.reduce((s, t) => s + t.exec_qty, 0);
         return `You are an expert trading assistant embedded inside a real-time limit order book dashboard. The user's name is ${username}.
 
-LIVE MARKET DATA (${username}'s AAPL order book):
+LIVE MARKET DATA (AAPL order book):
 - Best Bid: ${bestBid ? "$" + bestBid : "no bids yet"}
 - Best Ask: ${bestAsk ? "$" + bestAsk : "no asks yet"}
 - Spread: ${book?.spread >= 0 ? "$" + book.spread?.toFixed(2) : "no spread yet"}
 - Live Orders in Book: ${book?.order_count ?? 0}
 - Top 3 Bids: ${book?.bids?.slice(0, 3).map(l => `$${l.px} x ${l.total_qty}`).join(", ") || "none"}
 - Top 3 Asks: ${book?.asks?.slice(0, 3).map(l => `$${l.px} x ${l.total_qty}`).join(", ") || "none"}
-- Trades executed this session: ${trades.length} (${totalVol} total shares)
+- Trades this session: ${trades.length} (${totalVol} total shares)
 - VWAP: ${vwap ? "$" + vwap.toFixed(2) : "no trades yet"}
 - Session P&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}
-- Recent trades: ${trades.slice(0, 5).map(t => `${t.exec_qty} @ $${t.exec_px.toFixed(2)}`).join(", ") || "none"}
+- Recent trades: ${trades.slice(0, 5).map(t => `${t.exec_qty} @ $${parseFloat(t.exec_px).toFixed(2)}`).join(", ") || "none"}
 
-ABOUT THIS PROJECT:
-This is a limit order book engine with a C++ core (price-time priority matching, O(1) cancel via hash map + deque iterator), Python FastAPI REST layer, pybind11 bridge, JWT auth, SQLite persistence, and React+D3 frontend.
+ABOUT THIS SYSTEM:
+This is a limit order book engine with a C++ core (price-time priority matching, O(1) cancel via hash map + deque iterator), Python FastAPI REST layer, pybind11 bridge, JWT authentication, SQLite persistence, and React+D3 frontend. Built as a Jane Street internship project.
 
 HOW THE ENGINE WORKS:
-- Orders stored in std::map<price, deque<Order>> for bids (descending) and asks (ascending)
-- Matching: incoming order walks opposite side level by level, fills as much as possible
-- Cancel: O(1) via unordered_map<order_id, iterator> pointing directly into the deque
+- Bids: std::map<price, deque<Order>, descending> — best bid at begin()
+- Asks: std::map<price, deque<Order>, ascending> — best ask at begin()
+- Matching: incoming order walks opposite side, fills level by level
+- Cancel: O(1) via unordered_map<order_id, iterator> pointing into deque
 - Price-time priority: best price first, FIFO within same price level
 
-YOUR JOB:
-- Answer trading questions using the LIVE data above with specific numbers
-- Give trade suggestions based on current book state (e.g. "the spread is wide, place a buy at $X to tighten it")
-- Explain any trading concept clearly for beginners
-- Explain how the C++ engine works if asked
-- Guide users through dashboard features
-- Keep responses under 150 words unless detail is needed`;
+YOUR ROLE:
+- Give specific trading suggestions using the LIVE numbers above
+- Explain any concept clearly for beginners
+- Keep responses under 120 words unless explanation needs more
+- Be direct and conversational`;
     }
 
     async function send() {
@@ -118,7 +117,7 @@ YOUR JOB:
         setMsgs(prev => [...prev, { role: "user", content: userMsg }]);
         setLoading(true);
         try {
-            const history = msgs.slice(-8).map(m => ({ role: m.role, content: m.content }));
+            const history = msgs.slice(-6).map(m => ({ role: m.role, content: m.content }));
             const r = await fetch(`${API}/ai/chat`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
@@ -127,15 +126,14 @@ YOUR JOB:
                     messages: [...history, { role: "user", content: userMsg }]
                 })
             });
-            if (!r.ok) {
-                const errData = await r.json().catch(() => ({}));
-                throw new Error(errData.detail || `HTTP ${r.status}`);
-            }
             const data = await r.json();
-            const reply = data?.content?.[0]?.text || data?.error?.message || "no response from AI";
-            setMsgs(prev => [...prev, { role: "assistant", content: reply }]);
-        } catch (e) {
-            setMsgs(prev => [...prev, { role: "assistant", content: `Error: ${e.message || "connection error — check that uvicorn is running and GEMINI_API_KEY is set"}` }]);
+            if (!r.ok) {
+                setMsgs(prev => [...prev, { role: "assistant", content: `Error: ${data.detail || "check that GEMINI_API_KEY is set and uvicorn is restarted"}` }]);
+            } else {
+                setMsgs(prev => [...prev, { role: "assistant", content: data.text || "no response" }]);
+            }
+        } catch {
+            setMsgs(prev => [...prev, { role: "assistant", content: "connection error — make sure uvicorn is running on :8080" }]);
         } finally {
             setLoading(false);
         }
@@ -206,42 +204,50 @@ export default function BookView({ symbol = "AAPL", token, username, onLogout })
     const [pnl, setPnl] = useState(0);
     const [allOrders, setAllOrders] = useState([]);
     const [volByPrice, setVolByPrice] = useState({});
+    const [historyLoaded, setHistoryLoaded] = useState(false);
 
     const authHdr = { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" };
 
-    // Load persistent history on login
     useEffect(() => {
         async function loadHistory() {
             try {
                 const r = await fetch(`${API}/history/${symbol}`, { headers: { "Authorization": `Bearer ${token}` } });
                 if (!r.ok) return;
                 const data = await r.json();
+
                 if (data.trades?.length > 0) {
-                    const loaded = data.trades.map(t => ({ ...t, id: Math.random(), exec_px: t.exec_px, exec_qty: t.exec_qty }));
-                    setTrades(loaded);
-                    setPriceHistory(data.trades.slice().reverse().map(t => ({ px: t.exec_px, t: t.created_at })));
+                    const loaded = data.trades.map(t => ({
+                        ...t, id: Math.random(),
+                        exec_px: parseFloat(t.exec_px),
+                        exec_qty: parseInt(t.exec_qty)
+                    }));
+                    setTrades([...loaded].reverse());
+
+                    const ph = data.trades.map(t => ({ px: parseFloat(t.exec_px), t: t.created_at }));
+                    setPriceHistory(ph);
+
                     const vol = {};
-                    data.trades.forEach(t => { const k = t.exec_px.toFixed(2); vol[k] = (vol[k] || 0) + t.exec_qty; });
+                    data.trades.forEach(t => {
+                        const k = parseFloat(t.exec_px).toFixed(2);
+                        vol[k] = (vol[k] || 0) + parseInt(t.exec_qty);
+                    });
                     setVolByPrice(vol);
-                    const totalVol = data.trades.reduce((s, t) => s + t.exec_qty, 0);
-                    const calculatedPnl = data.trades.reduce((s, t) => {
-                        const order = data.orders.find(o => o.oid === t.buy_oid || o.oid === t.sell_oid);
-                        if (order?.side === "SELL") return s + t.exec_px * t.exec_qty;
-                        return s - t.exec_px * t.exec_qty;
-                    }, 0);
-                    setPnl(calculatedPnl);
                 }
+
                 if (data.orders?.length > 0) {
-                    setAllOrders(data.orders.map(o => ({ ...o, at: o.created_at })));
-                    const resting = data.orders.filter(o => o.status === "resting");
-                    setPendingOrders(resting);
+                    setAllOrders(data.orders.map(o => ({ ...o, px: parseFloat(o.px), qty: parseInt(o.qty) })));
+                    setPendingOrders(data.orders.filter(o => o.status === "resting").map(o => ({ ...o, px: parseFloat(o.px) })));
                 }
-            } catch { }
+
+                setHistoryLoaded(true);
+            } catch (e) {
+                console.error("history load failed", e);
+                setHistoryLoaded(true);
+            }
         }
         loadHistory();
     }, [symbol, token]);
 
-    // Poll book
     useEffect(() => {
         const poll = setInterval(async () => {
             try {
@@ -255,7 +261,6 @@ export default function BookView({ symbol = "AAPL", token, username, onLogout })
         return () => clearInterval(poll);
     }, [symbol, token]);
 
-    // Depth chart
     useEffect(() => {
         if (!book || !depthRef.current) return;
         const prev = prevBook.current;
@@ -287,46 +292,68 @@ export default function BookView({ symbol = "AAPL", token, username, onLogout })
         mainG.select(".midline").attr("x1", mid).attr("x2", mid).attr("y1", 0).attr("y2", ih);
         mainG.select(".bid-label").attr("x", mid / 2).attr("y", ih + 13).text("← BIDS");
         mainG.select(".ask-label").attr("x", mid + mid / 2).attr("y", ih + 13).text("ASKS →");
+
         const askSel = mainG.selectAll("rect.ask").data([...book.asks].reverse(), d => d.px);
         askSel.enter().append("rect").attr("class", "ask").attr("fill", "#c04040").attr("opacity", 0.6).attr("rx", 2).attr("x", mid + 8).attr("width", 0).attr("height", 0).attr("y", ih)
             .merge(askSel).transition().duration(250).attr("y", d => yScale(String(d.px))).attr("height", yScale.bandwidth()).attr("width", d => xScale(d.total_qty));
         askSel.exit().transition().duration(150).attr("width", 0).remove();
+
         const bidSel = mainG.selectAll("rect.bid").data(book.bids, d => d.px);
         bidSel.enter().append("rect").attr("class", "bid").attr("fill", "#2a8a5a").attr("opacity", 0.6).attr("rx", 2).attr("width", 0).attr("height", 0).attr("y", ih)
             .merge(bidSel).transition().duration(250).attr("y", d => yScale(String(d.px))).attr("height", yScale.bandwidth()).attr("x", d => mid - 8 - xScale(d.total_qty)).attr("width", d => xScale(d.total_qty));
         bidSel.exit().transition().duration(150).attr("width", 0).remove();
+
         const pxSel = mainG.selectAll("text.pxlabel").data(priceOrder, d => d);
         pxSel.enter().append("text").attr("class", "pxlabel").attr("text-anchor", "middle").attr("font-size", 8).attr("fill", "#2a2a4a").attr("font-family", "monospace")
             .merge(pxSel).transition().duration(250).attr("x", mid).attr("y", d => (yScale(d) || 0) + yScale.bandwidth() / 2).attr("dy", "0.35em").text(d => parseFloat(d).toFixed(2));
         pxSel.exit().remove();
     }, [book]);
 
-    // Price chart
     useEffect(() => {
         if (!chartRef.current || priceHistory.length < 2) return;
         const W = chartRef.current.clientWidth || 600;
-        const H = 200;
-        const m = { t: 10, r: 16, b: 24, l: 52 };
+        const H = 220;
+        const m = { t: 12, r: 20, b: 28, l: 56 };
         const iw = W - m.l - m.r;
         const ih = H - m.t - m.b;
+
         const xScale = d3.scaleLinear().domain([0, priceHistory.length - 1]).range([0, iw]);
         const prices = priceHistory.map(d => d.px);
-        const yScale = d3.scaleLinear().domain([Math.min(...prices) - 0.5, Math.max(...prices) + 0.5]).range([ih, 0]);
+        const pMin = Math.min(...prices);
+        const pMax = Math.max(...prices);
+        const pad = (pMax - pMin) * 0.1 || 1;
+        const yScale = d3.scaleLinear().domain([pMin - pad, pMax + pad]).range([ih, 0]);
+
         const line = d3.line().x((d, i) => xScale(i)).y(d => yScale(d.px)).curve(d3.curveMonotoneX);
         const area = d3.area().x((d, i) => xScale(i)).y0(ih).y1(d => yScale(d.px)).curve(d3.curveMonotoneX);
+
         const svg = d3.select(chartRef.current);
         svg.selectAll("*").remove();
         svg.attr("width", W).attr("height", H);
-        const g = svg.append("g").attr("transform", `translate(${m.l},${m.t})`);
-        const grad = svg.append("defs").append("linearGradient").attr("id", "cg").attr("x1", 0).attr("x2", 0).attr("y1", 0).attr("y2", 1);
-        grad.append("stop").attr("offset", "0%").attr("stop-color", "#2a8a5a").attr("stop-opacity", 0.3);
+
+        const defs = svg.append("defs");
+        const grad = defs.append("linearGradient").attr("id", "chartGrad").attr("x1", 0).attr("x2", 0).attr("y1", 0).attr("y2", 1);
+        grad.append("stop").attr("offset", "0%").attr("stop-color", "#2a8a5a").attr("stop-opacity", 0.35);
         grad.append("stop").attr("offset", "100%").attr("stop-color", "#2a8a5a").attr("stop-opacity", 0);
-        g.append("path").datum(priceHistory).attr("fill", "url(#cg)").attr("d", area);
-        g.append("path").datum(priceHistory).attr("fill", "none").attr("stroke", "#2a8a5a").attr("stroke-width", 1.5).attr("d", line);
-        g.append("g").call(d3.axisLeft(yScale).ticks(4).tickFormat(d => `$${d.toFixed(2)}`)).selectAll("text").style("fill", "#3a3a5a").style("font-size", "9px").style("font-family", "monospace");
-        g.selectAll(".domain, .tick line").attr("stroke", "#1a1a2a");
+
+        const g = svg.append("g").attr("transform", `translate(${m.l},${m.t})`);
+
+        g.selectAll(".grid").data(yScale.ticks(4)).enter().append("line")
+            .attr("x1", 0).attr("x2", iw).attr("y1", d => yScale(d)).attr("y2", d => yScale(d))
+            .attr("stroke", "#111120").attr("stroke-width", 1);
+
+        g.append("path").datum(priceHistory).attr("fill", "url(#chartGrad)").attr("d", area);
+        g.append("path").datum(priceHistory).attr("fill", "none").attr("stroke", "#2a8a5a").attr("stroke-width", 1.8).attr("d", line);
+
+        g.append("g").call(d3.axisLeft(yScale).ticks(4).tickFormat(d => `$${d.toFixed(2)}`))
+            .selectAll("text").style("fill", "#3a3a5a").style("font-size", "9px").style("font-family", "monospace");
+        g.selectAll(".domain, .tick line").attr("stroke", "#1e1e2e");
+
         const last = priceHistory[priceHistory.length - 1];
-        g.append("circle").attr("cx", xScale(priceHistory.length - 1)).attr("cy", yScale(last.px)).attr("r", 3).attr("fill", "#2a8a5a");
+        const lastX = xScale(priceHistory.length - 1);
+        const lastY = yScale(last.px);
+        g.append("circle").attr("cx", lastX).attr("cy", lastY).attr("r", 4).attr("fill", "#2a8a5a").attr("stroke", "#07070f").attr("stroke-width", 2);
+        g.append("text").attr("x", lastX + 8).attr("y", lastY + 4).attr("font-size", 9).attr("fill", "#2a8a5a").attr("font-family", "monospace").text(`$${last.px.toFixed(2)}`);
     }, [priceHistory]);
 
     async function submitOrder(e) {
@@ -334,27 +361,30 @@ export default function BookView({ symbol = "AAPL", token, username, onLogout })
         const oid = oidCounter;
         setOidCounter(c => c + 1);
         const body = { oid, side: form.side, px: parseFloat(form.px), qty: parseInt(form.qty), ts: Date.now() };
-        setAllOrders(prev => [{ ...body, status: "resting", at: new Date().toISOString() }, ...prev].slice(0, 100));
+        setAllOrders(prev => [{ ...body, status: "resting", at: new Date().toISOString() }, ...prev].slice(0, 200));
         try {
             const r = await fetch(`${API}/order/${symbol}`, { method: "POST", headers: authHdr, body: JSON.stringify(body) });
             if (r.status === 401) { onLogout(); return; }
             const result = await r.json();
             if (result.length > 0) {
-                const newTrades = result.map(t => ({ ...t, at: Date.now(), id: Math.random() }));
-                setTrades(prev => [...newTrades, ...prev].slice(0, 100));
+                const newTrades = result.map(t => ({ ...t, at: Date.now(), id: Math.random(), exec_px: parseFloat(t.exec_px), exec_qty: parseInt(t.exec_qty) }));
+                setTrades(prev => [...newTrades, ...prev].slice(0, 200));
                 setAllOrders(prev => prev.map(o => o.oid === oid ? { ...o, status: "filled" } : o));
-                setPriceHistory(prev => [...prev, { px: result[0].exec_px, t: Date.now() }].slice(-80));
+                setPriceHistory(prev => {
+                    const newPts = newTrades.map(t => ({ px: t.exec_px, t: Date.now() }));
+                    return [...prev, ...newPts].slice(-100);
+                });
                 const qty = result.reduce((s, t) => s + t.exec_qty, 0);
                 const avg = result.reduce((s, t) => s + t.exec_px * t.exec_qty, 0) / qty;
                 setPnl(prev => prev + (body.side === "SELL" ? avg * qty : -avg * qty));
                 setVolByPrice(prev => {
                     const n = { ...prev };
-                    result.forEach(t => { const k = t.exec_px.toFixed(2); n[k] = (n[k] || 0) + t.exec_qty; });
+                    result.forEach(t => { const k = parseFloat(t.exec_px).toFixed(2); n[k] = (n[k] || 0) + t.exec_qty; });
                     return n;
                 });
                 setFlash({ msg: `⚡ ${qty} @ $${avg.toFixed(2)}`, color: "#2a8a5a" });
             } else {
-                setPendingOrders(prev => [...prev, { oid, ...body, at: Date.now() }].slice(-20));
+                setPendingOrders(prev => [...prev, { oid, ...body }].slice(-20));
                 setFlash({ msg: `resting @ $${body.px.toFixed(2)}`, color: "#4a4a9a" });
             }
             setTimeout(() => setFlash(null), 2000);
@@ -392,8 +422,8 @@ export default function BookView({ symbol = "AAPL", token, username, onLogout })
                             ["📗 BIDS", "Buy orders resting in book. Best bid at top. Green bars = quantity."],
                             ["📕 ASKS", "Sell orders. Best ask at top. Red bars = quantity."],
                             ["⚡ CROSS SPREAD", "BUY >= best ask or SELL <= best bid = instant execution."],
-                            ["✦ AI ASSISTANT", "Purple button bottom-right — ask for live trade suggestions."],
-                            ["💾 PERSISTENT", "Your trade history and orders are saved across sessions."],
+                            ["✦ AI ASSISTANT", "Purple button bottom-right — Gemini-powered live trade guidance."],
+                            ["💾 PERSISTENT", "Your full trade history is saved and reloads on every login."],
                         ].map(([t, d]) => (
                             <div key={t} style={{ display: "flex", gap: 12, marginBottom: 10 }}>
                                 <div style={{ fontSize: 10, fontWeight: 700, color: "#7070a0", minWidth: 130 }}>{t}</div>
@@ -453,10 +483,13 @@ export default function BookView({ symbol = "AAPL", token, username, onLogout })
                             )}
                             {tab === "CHART" && (
                                 <div>
-                                    <div style={{ fontSize: 9, color: "#3a3a5a", marginBottom: 10 }}>LAST TRADE PRICE — all-time history</div>
+                                    <div style={{ fontSize: 9, color: "#3a3a5a", marginBottom: 10, display: "flex", justifyContent: "space-between" }}>
+                                        <span>LAST TRADE PRICE — all-time history</span>
+                                        <span style={{ color: "#2a2a4a" }}>{priceHistory.length} data points</span>
+                                    </div>
                                     {priceHistory.length < 2
                                         ? <div style={{ textAlign: "center", padding: "40px 0", fontSize: 10, color: "#2a2a4a" }}>execute at least 2 trades to see the chart</div>
-                                        : <svg ref={chartRef} style={{ width: "100%", display: "block", minHeight: 200 }} />
+                                        : <svg ref={chartRef} style={{ width: "100%", display: "block", minHeight: 220 }} />
                                     }
                                 </div>
                             )}
@@ -498,29 +531,31 @@ export default function BookView({ symbol = "AAPL", token, username, onLogout })
                             {tab === "HISTORY" && (
                                 <div>
                                     <div style={{ fontSize: 9, color: "#3a3a5a", marginBottom: 10 }}>ORDER HISTORY — all time for @{username}</div>
-                                    {allOrders.length === 0
-                                        ? <div style={{ fontSize: 10, color: "#2a2a4a", textAlign: "center", padding: 20 }}>no orders placed yet</div>
-                                        : (
-                                            <div style={{ maxHeight: 280, overflowY: "auto" }}>
-                                                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10 }}>
-                                                    <thead>
-                                                        <tr>{["OID", "SIDE", "PRICE", "QTY", "STATUS", "TIME"].map(h => <td key={h} style={{ padding: "4px 8px", borderBottom: "1px solid #111120", fontSize: 9, color: "#3a3a5a", letterSpacing: "0.08em" }}>{h}</td>)}</tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {allOrders.map((o, i) => (
-                                                            <tr key={i} style={{ borderBottom: "1px solid #0e0e1c" }}>
-                                                                <td style={{ padding: "5px 8px", color: "#3a3a5a" }}>#{o.oid}</td>
-                                                                <td style={{ padding: "5px 8px", color: o.side === "BUY" ? "#2a8a5a" : "#c04040", fontWeight: 700 }}>{o.side}</td>
-                                                                <td style={{ padding: "5px 8px", color: "#8080b0" }}>${parseFloat(o.px).toFixed(2)}</td>
-                                                                <td style={{ padding: "5px 8px", color: "#6060a0" }}>{o.qty}</td>
-                                                                <td style={{ padding: "5px 8px", color: o.status === "filled" ? "#2a8a5a" : o.status === "cancelled" ? "#604040" : "#404080" }}>{o.status}</td>
-                                                                <td style={{ padding: "5px 8px", color: "#2a2a4a", fontSize: 8 }}>{typeof o.at === "string" ? o.at.slice(0, 16).replace("T", " ") : "—"}</td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        )
+                                    {!historyLoaded
+                                        ? <div style={{ fontSize: 10, color: "#2a2a4a", textAlign: "center", padding: 20 }}>loading...</div>
+                                        : allOrders.length === 0
+                                            ? <div style={{ fontSize: 10, color: "#2a2a4a", textAlign: "center", padding: 20 }}>no orders placed yet</div>
+                                            : (
+                                                <div style={{ maxHeight: 280, overflowY: "auto" }}>
+                                                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10 }}>
+                                                        <thead>
+                                                            <tr>{["OID", "SIDE", "PRICE", "QTY", "STATUS", "TIME"].map(h => <td key={h} style={{ padding: "4px 8px", borderBottom: "1px solid #111120", fontSize: 9, color: "#3a3a5a", letterSpacing: "0.08em" }}>{h}</td>)}</tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {allOrders.map((o, i) => (
+                                                                <tr key={i} style={{ borderBottom: "1px solid #0e0e1c" }}>
+                                                                    <td style={{ padding: "5px 8px", color: "#3a3a5a" }}>#{o.oid}</td>
+                                                                    <td style={{ padding: "5px 8px", color: o.side === "BUY" ? "#2a8a5a" : "#c04040", fontWeight: 700 }}>{o.side}</td>
+                                                                    <td style={{ padding: "5px 8px", color: "#8080b0" }}>${parseFloat(o.px).toFixed(2)}</td>
+                                                                    <td style={{ padding: "5px 8px", color: "#6060a0" }}>{o.qty}</td>
+                                                                    <td style={{ padding: "5px 8px", color: o.status === "filled" ? "#2a8a5a" : o.status === "cancelled" ? "#604040" : "#404080" }}>{o.status}</td>
+                                                                    <td style={{ padding: "5px 8px", color: "#2a2a4a", fontSize: 8 }}>{typeof o.at === "string" ? o.at.slice(0, 16).replace("T", " ") : "—"}</td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            )
                                     }
                                 </div>
                             )}
@@ -599,7 +634,7 @@ export default function BookView({ symbol = "AAPL", token, username, onLogout })
                             ["2.", "Place SELLs above best bid — rest in book"],
                             ["3.", "Cross the spread to execute instantly"],
                             ["4.", "Check ANALYTICS for VWAP & volume profile"],
-                            ["5.", "Ask ✦ AI assistant for live trade ideas"],
+                            ["5.", "Ask ✦ AI for live Gemini-powered trade ideas"],
                             ["6.", "HISTORY tab shows all your past orders"],
                         ].map(([n, t]) => (
                             <div key={n} style={{ display: "flex", gap: 8, marginBottom: 8, fontSize: 10, lineHeight: 1.5 }}>
