@@ -321,7 +321,7 @@ async def ai_chat(req: AIReq, username: str = Depends(get_current_user)):
         contents.append({"role": role, "parts": [{"text": m["content"]}]})
     if not contents or contents[0]["role"] == "model":
         contents.insert(0, {"role": "user", "parts": [{"text": "hello"}]})
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
     async with httpx.AsyncClient() as client:
         r = await client.post(url, json={
             "system_instruction": {"parts": [{"text": req.system}]},

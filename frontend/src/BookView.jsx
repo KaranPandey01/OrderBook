@@ -258,37 +258,79 @@ export default function BookView({ symbol = "AAPL", token, username, onLogout, o
     }, [book]);
 
     useEffect(() => {
-    if (!chartRef.current || priceHistory.length < 1) return;
-    if (priceHistory.length === 1) {
-        const ph = [priceHistory[0], priceHistory[0]];
-        setPriceHistory(ph);
-        return;
-    }
-        const W = chartRef.current.clientWidth || 600; const H = 220;
-        const m = { t: 12, r: 20, b: 28, l: 56 };
-        const iw = W - m.l - m.r; const ih = H - m.t - m.b;
-        const xScale = d3.scaleLinear().domain([0, priceHistory.length - 1]).range([0, iw]);
-        const prices = priceHistory.map(d => d.px);
-        const pMin = Math.min(...prices); const pMax = Math.max(...prices);
-        const pad = (pMax - pMin) * 0.1 || 1;
+        if (!chartRef.current || priceHistory.length === 0) return;
+
+        const pts = priceHistory.length === 1
+            ? [priceHistory[0], { ...priceHistory[0] }]
+            : priceHistory;
+
+        const W = chartRef.current.clientWidth || 600;
+        const H = 220;
+        const m = { t: 16, r: 60, b: 28, l: 56 };
+        const iw = W - m.l - m.r;
+        const ih = H - m.t - m.b;
+
+        const xScale = d3.scaleLinear().domain([0, pts.length - 1]).range([0, iw]);
+        const prices = pts.map(d => d.px);
+        const pMin = Math.min(...prices);
+        const pMax = Math.max(...prices);
+        const pad = (pMax - pMin) * 0.15 || 2;
         const yScale = d3.scaleLinear().domain([pMin - pad, pMax + pad]).range([ih, 0]);
+
         const line = d3.line().x((d, i) => xScale(i)).y(d => yScale(d.px)).curve(d3.curveMonotoneX);
         const area = d3.area().x((d, i) => xScale(i)).y0(ih).y1(d => yScale(d.px)).curve(d3.curveMonotoneX);
+
         const svg = d3.select(chartRef.current);
-        svg.selectAll("*").remove(); svg.attr("width", W).attr("height", H);
+        svg.selectAll("*").remove();
+        svg.attr("width", W).attr("height", H);
+
         const defs = svg.append("defs");
-        const grad = defs.append("linearGradient").attr("id", "cg").attr("x1", 0).attr("x2", 0).attr("y1", 0).attr("y2", 1);
-        grad.append("stop").attr("offset", "0%").attr("stop-color", "#2a8a5a").attr("stop-opacity", 0.3);
+        const grad = defs.append("linearGradient").attr("id", "cg2").attr("x1", 0).attr("x2", 0).attr("y1", 0).attr("y2", 1);
+        grad.append("stop").attr("offset", "0%").attr("stop-color", "#2a8a5a").attr("stop-opacity", 0.35);
         grad.append("stop").attr("offset", "100%").attr("stop-color", "#2a8a5a").attr("stop-opacity", 0);
+
         const g = svg.append("g").attr("transform", `translate(${m.l},${m.t})`);
-        g.selectAll(".grid").data(yScale.ticks(4)).enter().append("line").attr("x1", 0).attr("x2", iw).attr("y1", d => yScale(d)).attr("y2", d => yScale(d)).attr("stroke", "#111120").attr("stroke-width", 1);
-        g.append("path").datum(priceHistory).attr("fill", "url(#cg)").attr("d", area);
-        g.append("path").datum(priceHistory).attr("fill", "none").attr("stroke", "#2a8a5a").attr("stroke-width", 1.8).attr("d", line);
-        g.append("g").call(d3.axisLeft(yScale).ticks(4).tickFormat(d => `$${d.toFixed(2)}`)).selectAll("text").style("fill", "#3a3a5a").style("font-size", "9px").style("font-family", "monospace");
+
+        g.selectAll(".grid")
+            .data(yScale.ticks(4)).enter()
+            .append("line").attr("x1", 0).attr("x2", iw)
+            .attr("y1", d => yScale(d)).attr("y2", d => yScale(d))
+            .attr("stroke", "#111120").attr("stroke-width", 1);
+
+        g.append("path").datum(pts).attr("fill", "url(#cg2)").attr("d", area);
+        g.append("path").datum(pts).attr("fill", "none").attr("stroke", "#2a8a5a").attr("stroke-width", 2).attr("d", line);
+
+        g.append("g")
+            .call(d3.axisLeft(yScale).ticks(4).tickFormat(d => `$${d.toFixed(2)}`))
+            .selectAll("text").style("fill", "#3a3a5a").style("font-size", "9px").style("font-family", "monospace");
         g.selectAll(".domain, .tick line").attr("stroke", "#1e1e2e");
-        const last = priceHistory[priceHistory.length - 1];
-        g.append("circle").attr("cx", xScale(priceHistory.length - 1)).attr("cy", yScale(last.px)).attr("r", 4).attr("fill", "#2a8a5a").attr("stroke", "#07070f").attr("stroke-width", 2);
-        g.append("text").attr("x", xScale(priceHistory.length - 1) + 8).attr("y", yScale(last.px) + 4).attr("font-size", 9).attr("fill", "#2a8a5a").attr("font-family", "monospace").text(`$${last.px.toFixed(2)}`);
+
+        const last = pts[pts.length - 1];
+        const lastX = xScale(pts.length - 1);
+        const lastY = yScale(last.px);
+
+        g.append("line")
+            .attr("x1", lastX).attr("x2", iw + 2)
+            .attr("y1", lastY).attr("y2", lastY)
+            .attr("stroke", "#2a8a5a").attr("stroke-width", 0.5)
+            .attr("stroke-dasharray", "3,3").attr("opacity", 0.5);
+
+        g.append("circle")
+            .attr("cx", lastX).attr("cy", lastY)
+            .attr("r", 4).attr("fill", "#2a8a5a")
+            .attr("stroke", "#07070f").attr("stroke-width", 2);
+
+        g.append("rect")
+            .attr("x", iw + 4).attr("y", lastY - 9)
+            .attr("width", 50).attr("height", 16)
+            .attr("fill", "#0a1e12").attr("rx", 3);
+
+        g.append("text")
+            .attr("x", iw + 8).attr("y", lastY + 3)
+            .attr("font-size", 9).attr("fill", "#2a8a5a")
+            .attr("font-family", "monospace")
+            .text(`$${last.px.toFixed(2)}`);
+
     }, [priceHistory]);
 
     async function submitOrder(e) {
@@ -317,6 +359,7 @@ export default function BookView({ symbol = "AAPL", token, username, onLogout, o
                 setTrades(prev => [...newTrades, ...prev].slice(0, 200));
                 setAllOrders(prev => prev.map(o => o.oid === oid ? { ...o, status: "filled" } : o));
                 setPriceHistory(prev => [...prev, ...newTrades.map(t => ({ px: t.exec_px, t: Date.now() }))].slice(-100));
+                setTab("CHART");
                 const qty = result.reduce((s, t) => s + t.exec_qty, 0);
                 const avg = result.reduce((s, t) => s + t.exec_px * t.exec_qty, 0) / qty;
                 setPnl(prev => prev + (body.side === "SELL" ? avg * qty : -avg * qty));
@@ -450,8 +493,8 @@ export default function BookView({ symbol = "AAPL", token, username, onLogout, o
                                         <span>LAST TRADE PRICE — all-time history</span>
                                         <span style={{ color: "#2a2a4a" }}>{priceHistory.length} pts</span>
                                     </div>
-                                    {priceHistory.length < 1
-                                        ? <div style={{ textAlign: "center", padding: "40px 0", fontSize: 10, color: "#2a2a4a" }}>execute at least 2 trades to see the chart</div>
+                                    {priceHistory.length === 0
+                                        ? <div style={{ textAlign: "center", padding: "40px 0", fontSize: 10, color: "#2a2a4a" }}>execute a trade to see the price chart</div>
                                         : <svg ref={chartRef} style={{ width: "100%", display: "block", minHeight: 220 }} />
                                     }
                                 </div>
