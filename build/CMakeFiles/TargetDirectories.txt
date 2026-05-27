@@ -1,3 +1,0 @@
-C:/Users/karan/OneDrive/Desktop/orderbook/build/CMakeFiles/ob_engine.dir
-C:/Users/karan/OneDrive/Desktop/orderbook/build/CMakeFiles/ALL_BUILD.dir
-C:/Users/karan/OneDrive/Desktop/orderbook/build/CMakeFiles/ZERO_CHECK.dir

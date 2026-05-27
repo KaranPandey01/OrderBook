@@ -3,7 +3,7 @@ import AuthPage from "./AuthPage";
 import BookView from "./BookView";
 import Portfolio from "./Portfolio";
 
-const API = "http://localhost:8080";
+const API = import.meta.env.VITE_API_URL || "http://localhost:8080";
 
 export default function App() {
     const [token, setToken] = useState(null);
