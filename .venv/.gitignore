@@ -1,13 +1,40 @@
+# Python
 .venv/
 venv/
 __pycache__/
 *.pyc
+*.pyo
 *.pyd
 *.so
+
+# Build artifacts
 build/
 dist/
-node_modules/
+*.egg-info/
+
+# Environment — NEVER commit this
 .env
+*.env
+.env.local
+.env.production
+
+# Database — contains user data
 api/users.db
+api/*.db
 *.db
+*.sqlite3
+
+# Node
+node_modules/
+frontend/dist/
+
+# VS Code
 .vscode/settings.json
+.vscode/launch.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+.env
+Add-Content .gitignore "`nfrontend/.env.local"
