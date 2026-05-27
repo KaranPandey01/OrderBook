@@ -5,20 +5,21 @@
 namespace py = pybind11;
 
 PYBIND11_MODULE(ob_engine, m) {
-
     py::enum_<Side>(m, "Side")
         .value("BUY",  Side::BUY)
         .value("SELL", Side::SELL)
         .export_values();
 
     py::class_<Trade>(m, "Trade")
-        .def_readonly("buy_oid",   &Trade::buy_oid)
-        .def_readonly("sell_oid",  &Trade::sell_oid)
-        .def_readonly("exec_px",   &Trade::exec_px)
-        .def_readonly("exec_qty",  &Trade::exec_qty);
+        .def_readonly("buy_oid",      &Trade::buy_oid)
+        .def_readonly("sell_oid",     &Trade::sell_oid)
+        .def_readonly("exec_px",      &Trade::exec_px)
+        .def_readonly("exec_px_ticks",&Trade::exec_px_ticks)
+        .def_readonly("exec_qty",     &Trade::exec_qty);
 
     py::class_<Level>(m, "Level")
         .def_readonly("px",        &Level::px)
+        .def_readonly("px_ticks",  &Level::px_ticks)
         .def_readonly("total_qty", &Level::total_qty);
 
     py::class_<BookSnap>(m, "BookSnap")
@@ -27,7 +28,8 @@ PYBIND11_MODULE(ob_engine, m) {
         .def_readonly("spread", &BookSnap::spread);
 
     py::class_<OrderBook>(m, "OrderBook")
-        .def(py::init<const std::string&>())
+        .def(py::init<const std::string&, int64_t>(),
+             py::arg("symbol"), py::arg("tick_size_micros") = 100)
         .def("submit",      &OrderBook::submit)
         .def("cancel",      &OrderBook::cancel)
         .def("snapshot",    &OrderBook::snapshot, py::arg("depth") = 10)

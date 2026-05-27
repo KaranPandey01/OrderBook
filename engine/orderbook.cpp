@@ -1,49 +1,51 @@
 #include "orderbook.hpp"
 
-OrderBook::OrderBook(const std::string& symbol) : sym_(symbol) {}
+OrderBook::OrderBook(const std::string& symbol, int64_t tick_size_micros)
+    : sym_(symbol), tick_(tick_size_micros) {}
 
-bool OrderBook::crosses(const Order& inc, double rest_px) const {
-    if (inc.side == Side::BUY)  return inc.px >= rest_px;
-    if (inc.side == Side::SELL) return inc.px <= rest_px;
+bool OrderBook::crosses(const Order& inc, int64_t rest_ticks) const {
+    if (inc.side == Side::BUY)  return inc.px_ticks >= rest_ticks;
+    if (inc.side == Side::SELL) return inc.px_ticks <= rest_ticks;
     return false;
 }
 
 void OrderBook::rest(Order& o) {
     if (o.side == Side::BUY) {
-        bids_[o.px].push_back(o);
-        auto& lvl = bids_[o.px];
-        auto it = std::prev(lvl.end());
-        idx_[o.oid] = { o.px, Side::BUY, it };
+        auto& lvl = bids_[o.px_ticks];
+        lvl.push_back(o);
+        idx_[o.oid] = { o.px_ticks, Side::BUY, std::prev(lvl.end()) };
     } else {
-        asks_[o.px].push_back(o);
-        auto& lvl = asks_[o.px];
-        auto it = std::prev(lvl.end());
-        idx_[o.oid] = { o.px, Side::SELL, it };
+        auto& lvl = asks_[o.px_ticks];
+        lvl.push_back(o);
+        idx_[o.oid] = { o.px_ticks, Side::SELL, std::prev(lvl.end()) };
     }
 }
 
 std::vector<Trade> OrderBook::submit(uint64_t oid, Side side, double px, int qty, uint64_t ts) {
-    Order incoming { oid, sym_, px, qty, ts, side };
+    int64_t px_ticks = to_ticks(px, tick_);
+    Order incoming { oid, sym_, px_ticks, qty, ts, side };
     std::vector<Trade> trades;
 
     auto try_match = [&](auto& opp_side) {
         while (incoming.qty > 0 && !opp_side.empty()) {
-            auto& [best_px, lvl] = *opp_side.begin();
-            if (!crosses(incoming, best_px)) break;
+            auto& [best_ticks, lvl] = *opp_side.begin();
+            if (!crosses(incoming, best_ticks)) break;
 
             while (incoming.qty > 0 && !lvl.empty()) {
                 auto& resting = lvl.front();
                 int fill = std::min(incoming.qty, resting.qty);
+                double exec_px = from_ticks(best_ticks, tick_);
 
                 Trade t;
-                t.exec_px  = best_px;
-                t.exec_qty = fill;
+                t.exec_px_ticks = best_ticks;
+                t.exec_px       = exec_px;
+                t.exec_qty      = fill;
                 t.buy_oid  = (side == Side::BUY)  ? incoming.oid : resting.oid;
                 t.sell_oid = (side == Side::SELL) ? incoming.oid : resting.oid;
                 trades.push_back(t);
 
-                incoming.qty  -= fill;
-                resting.qty   -= fill;
+                incoming.qty -= fill;
+                resting.qty  -= fill;
 
                 if (resting.qty == 0) {
                     idx_.erase(resting.oid);
@@ -58,7 +60,6 @@ std::vector<Trade> OrderBook::submit(uint64_t oid, Side side, double px, int qty
     else                     try_match(bids_);
 
     if (incoming.qty > 0) rest(incoming);
-
     return trades;
 }
 
@@ -68,51 +69,46 @@ void OrderBook::cancel(uint64_t oid) {
 
     auto& ref = found->second;
     if (ref.side == Side::BUY) {
-        auto& lvl = bids_.at(ref.px);
+        auto& lvl = bids_.at(ref.px_ticks);
         lvl.erase(ref.it);
-        if (lvl.empty()) bids_.erase(ref.px);
+        if (lvl.empty()) bids_.erase(ref.px_ticks);
     } else {
-        auto& lvl = asks_.at(ref.px);
+        auto& lvl = asks_.at(ref.px_ticks);
         lvl.erase(ref.it);
-        if (lvl.empty()) asks_.erase(ref.px);
+        if (lvl.empty()) asks_.erase(ref.px_ticks);
     }
     idx_.erase(found);
 }
 
 BookSnap OrderBook::snapshot(int depth) const {
     BookSnap snap;
-
     int i = 0;
-    for (auto& [px, lvl] : bids_) {
+    for (auto& [ticks, lvl] : bids_) {
         if (i++ >= depth) break;
         int total = 0;
         for (auto& o : lvl) total += o.qty;
-        snap.bids.push_back({ px, total });
+        snap.bids.push_back({ from_ticks(ticks, tick_), ticks, total });
     }
-
     i = 0;
-    for (auto& [px, lvl] : asks_) {
+    for (auto& [ticks, lvl] : asks_) {
         if (i++ >= depth) break;
         int total = 0;
         for (auto& o : lvl) total += o.qty;
-        snap.asks.push_back({ px, total });
+        snap.asks.push_back({ from_ticks(ticks, tick_), ticks, total });
     }
-
     snap.spread = (!snap.bids.empty() && !snap.asks.empty())
-        ? snap.asks[0].px - snap.bids[0].px
-        : -1.0;
-
+        ? snap.asks[0].px - snap.bids[0].px : -1.0;
     return snap;
 }
 
 double OrderBook::best_bid() const {
     if (bids_.empty()) return -1.0;
-    return bids_.begin()->first;
+    return from_ticks(bids_.begin()->first, tick_);
 }
 
 double OrderBook::best_ask() const {
     if (asks_.empty()) return -1.0;
-    return asks_.begin()->first;
+    return from_ticks(asks_.begin()->first, tick_);
 }
 
 size_t OrderBook::order_count() const {
