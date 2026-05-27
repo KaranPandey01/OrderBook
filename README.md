@@ -60,3 +60,16 @@ cd frontend && npm install && npm run dev
 ## Tech Stack
 
 `C++17` `Python 3.11` `FastAPI` `pybind11` `React` `D3.js` `SQLite` `JWT` `bcrypt` `Docker`
+## Benchmark
+
+Measured on Windows AMD64, Python 3.13.1, C++17 with /O2.
+
+| N Orders | Time (ms) | Throughput |
+|----------|-----------|------------|
+| 10,000   | 9.8       | 1,019,929/sec |
+| 100,000  | 127.9     | 781,767/sec |
+| 500,000  | 691.1     | 723,465/sec |
+| 1,000,000| 1,216.5   | 822,037/sec |
+
+Naive baseline (C++ vector linear scan) in `engine/naive_engine.hpp`.
+Speedup comes from O(log n) sorted map vs O(n) vector scan.
