@@ -9,7 +9,10 @@ from fastapi.security import OAuth2PasswordBearer
 SECRET = "ob_secret_key_change_in_prod_32chars"
 ALGO = "HS256"
 TOKEN_EXP_HOURS = 24
-DB_PATH = os.path.join(os.path.dirname(__file__), "users.db")
+DB_PATH = os.environ.get(
+    "DB_PATH",
+    os.path.join(os.path.dirname(__file__), "users.db")
+)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 

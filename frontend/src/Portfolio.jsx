@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-const API = import.meta.env.VITE_API_URL || "http://localhost:8080";
+const API = import.meta.env.VITE_API_URL || "/api";
 
 function fmt(n) {
     return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 }).format(n);

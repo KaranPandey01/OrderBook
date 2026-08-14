@@ -5,8 +5,8 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.env'))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'build'))
 
-from fastapi import FastAPI, HTTPException, Depends
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, HTTPException, Depends, APIRouter
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import httpx
 import ob_engine as eng
@@ -22,7 +22,7 @@ import sqlite3
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 app = FastAPI()
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+api_router = APIRouter(prefix="/api")
 init_db()
 
 books: dict[str, eng.OrderBook] = {}
@@ -103,7 +103,7 @@ class AIReq(BaseModel):
     system: str
 
 
-@app.post("/auth/signup")
+@api_router.post("/auth/signup")
 def signup(req: SignupReq):
     if len(req.username) < 3:
         raise HTTPException(400, "username must be at least 3 characters")
@@ -113,23 +113,23 @@ def signup(req: SignupReq):
     token = make_token(user["username"])
     return {"access_token": token, "token_type": "bearer", "username": user["username"]}
 
-@app.post("/auth/login")
+@api_router.post("/auth/login")
 def login(req: LoginReq):
     user = authenticate_user(req.username, req.password)
     token = make_token(user["username"])
     return {"access_token": token, "token_type": "bearer", "username": user["username"]}
 
-@app.get("/auth/me")
+@api_router.get("/auth/me")
 def me(payload: dict = Depends(get_token_info)):
     return {"username": payload.get("sub"), "issued_at": payload.get("iat"), "expires_at": payload.get("exp")}
 
-@app.post("/auth/refresh")
+@api_router.post("/auth/refresh")
 def refresh_token(username: str = Depends(get_current_user)):
     token = make_token(username)
     return {"access_token": token, "token_type": "bearer", "username": username}
 
 
-@app.get("/portfolio")
+@api_router.get("/portfolio")
 def portfolio(username: str = Depends(get_current_user)):
     conn = get_db()
     try:
@@ -157,16 +157,16 @@ def portfolio(username: str = Depends(get_current_user)):
     finally:
         conn.close()
 
-@app.post("/portfolio/deposit")
+@api_router.post("/portfolio/deposit")
 def deposit(req: DepositReq, username: str = Depends(get_current_user)):
     return deposit_funds(username, req.amount)
 
-@app.post("/portfolio/withdraw")
+@api_router.post("/portfolio/withdraw")
 def withdraw(req: WithdrawReq, username: str = Depends(get_current_user)):
     return withdraw_funds(username, req.amount)
 
 
-@app.post("/order/{symbol}", response_model=list[TradeResp])
+@api_router.post("/order/{symbol}", response_model=list[TradeResp])
 def submit_order(symbol: str, req: OrderReq, username: str = Depends(get_current_user)):
     conn = get_db()
     try:
@@ -246,7 +246,7 @@ def submit_order(symbol: str, req: OrderReq, username: str = Depends(get_current
         conn.close()
 
 
-@app.delete("/order/{symbol}/{oid}")
+@api_router.delete("/order/{symbol}/{oid}")
 def cancel_order(symbol: str, oid: int, username: str = Depends(get_current_user)):
     conn = get_db()
     try:
@@ -280,7 +280,7 @@ def cancel_order(symbol: str, oid: int, username: str = Depends(get_current_user
         conn.close()
 
 
-@app.get("/book/{symbol}", response_model=BookResp)
+@api_router.get("/book/{symbol}", response_model=BookResp)
 def get_book_snap(symbol: str, depth: int = 10, username: str = Depends(get_current_user)):
     book = get_book(symbol)
     snap = book.snapshot(depth)
@@ -293,7 +293,7 @@ def get_book_snap(symbol: str, depth: int = 10, username: str = Depends(get_curr
     )
 
 
-@app.get("/history/{symbol}")
+@api_router.get("/history/{symbol}")
 def get_history(symbol: str, username: str = Depends(get_current_user)):
     conn = get_db()
     try:
@@ -310,7 +310,7 @@ def get_history(symbol: str, username: str = Depends(get_current_user)):
         conn.close()
 
 
-@app.post("/ai/chat")
+@api_router.post("/ai/chat")
 async def ai_chat(req: AIReq, username: str = Depends(get_current_user)):
     key = GEMINI_API_KEY
     if not key:
@@ -338,6 +338,15 @@ async def ai_chat(req: AIReq, username: str = Depends(get_current_user)):
         return {"text": text}
 
 
-@app.get("/health")
+@api_router.get("/health")
 def health():
     return {"status": "ok", "active_books": list(books.keys()), "gemini": "configured" if GEMINI_API_KEY else "missing"}
+
+
+app.include_router(api_router)
+
+# Serve the React build. html=True falls back to index.html for any
+# unmatched GET path (client-side routes like /portfolio, /dashboard),
+# so refreshing on those pages loads the app instead of 404ing.
+# This MUST be the last thing registered — it's a catch-all mount.
+app.mount("/", StaticFiles(directory="static", html=True), name="static")
