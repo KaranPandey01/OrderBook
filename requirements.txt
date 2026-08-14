@@ -2,3 +2,7 @@ fastapi
 uvicorn[standard]
 pydantic
 pybind11
+httpx
+python-dotenv
+bcrypt
+python-jose[cryptography]
