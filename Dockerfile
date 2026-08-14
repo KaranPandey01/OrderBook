@@ -6,6 +6,7 @@ WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
+RUN chmod +x node_modules/.bin/*
 RUN npm run build
 # Output at /app/frontend/dist (Vite default — confirm in vite.config.js)
 
