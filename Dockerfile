@@ -19,7 +19,8 @@ WORKDIR /app
 COPY CMakeLists.txt ./
 COPY engine/ ./engine/
 RUN pip install --no-cache-dir pybind11
-RUN cmake -B build -DCMAKE_BUILD_TYPE=Release && \
+RUN cmake -B build -DCMAKE_BUILD_TYPE=Release \
+    -Dpybind11_DIR=$(python3 -m pybind11 --cmakedir) && \
     cmake --build build --config Release -j$(nproc)
 # pybind11_add_module(ob_engine ...) outputs to /app/build/ob_engine*.so
 
