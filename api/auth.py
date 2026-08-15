@@ -17,6 +17,12 @@ DB_PATH = os.environ.get(
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 def get_db():
+    # Guarantee the parent directory exists before connecting, so this
+    # can't fail regardless of what DB_PATH resolves to (env override
+    # or fallback).
+    parent = os.path.dirname(os.path.abspath(DB_PATH))
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
